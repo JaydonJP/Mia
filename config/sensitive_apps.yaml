@@ -1,0 +1,9 @@
+blocklist:
+  - "Bank"
+  - "Password"
+  - "Bitwarden"
+  - "1Password"
+  - "LastPass"
+  - "KeePass"
+  - "Authenticator"
+  - "Settings"

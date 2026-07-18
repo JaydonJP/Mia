@@ -1,0 +1,17 @@
+llm:
+  mode: local          # local | cloud | auto
+  local:
+    provider: ollama
+    vision_model: qwen2.5vl:7b
+    text_model: qwen2.5:7b
+  cloud:
+    provider: openai   # openai | anthropic | gemini
+    model: gpt-4o
+    # api_key loaded from ~/.mia/secrets.env
+  auto:
+    cloud_threshold: complex   # route multi-step + vision-heavy to cloud
+
+voice:
+  push_to_talk_key: right ctrl
+  wake_word: "hey mia"
+  piper_voice: "en_GB-alan-medium"
