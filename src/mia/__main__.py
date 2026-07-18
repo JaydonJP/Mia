@@ -2,7 +2,7 @@ import sys
 from .app import MiaApp
 
 def main():
-    print("Mia JARVIS Assistant starting...")
+    print("Mia starting...")
     app = MiaApp()
     app.run()
 

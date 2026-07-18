@@ -2,8 +2,8 @@ llm:
   mode: local          # local | cloud | auto
   local:
     provider: ollama
-    vision_model: qwen2.5vl:7b
-    text_model: qwen2.5:7b
+    vision_model: qwen2.5vl:3b
+    text_model: qwen2.5:3b
   cloud:
     provider: openai   # openai | anthropic | gemini
     model: gpt-4o

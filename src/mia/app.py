@@ -10,6 +10,7 @@ import sys
 class MiaApp:
     def __init__(self):
         self.running = True
+        self.is_recording = False
         self.config = self.load_config()
         self.mode = self.config.get("llm", {}).get("mode", "local")
         
@@ -46,11 +47,19 @@ class MiaApp:
         print(f"Hotkeys registered. PTT: {ptt_key}, Kill switch: Ctrl+Shift+Pause")
 
     def on_ptt_press(self, event):
+        if self.is_recording:
+            return
+            
+        self.is_recording = True
         print("Listening...")
         if hasattr(self, 'stt'):
             self.stt.start_recording()
 
     def on_ptt_release(self, event):
+        if not self.is_recording:
+            return
+            
+        self.is_recording = False
         print("Processing audio...")
         if hasattr(self, 'stt'):
             text = self.stt.stop_recording_and_transcribe()
@@ -100,7 +109,7 @@ class MiaApp:
         self.running = False
         if hasattr(self, 'icon'):
             self.icon.stop()
-        print("Mia JARVIS Assistant shutting down.")
+        print("Mia shutting down.")
         sys.exit(0)
 
     def run(self):

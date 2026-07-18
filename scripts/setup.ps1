@@ -1,4 +1,4 @@
-Write-Host "Setting up Mia JARVIS Assistant..."
+Write-Host "Setting up Mia..."
 
 # 1. Defender exclusion for Mia folder
 $MiaPath = Resolve-Path ".."

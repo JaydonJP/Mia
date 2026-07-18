@@ -12,9 +12,17 @@ class OpenAIClient(LLMProvider):
         if os.path.exists(secrets_path):
             load_dotenv(secrets_path)
             
-        self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            print("Warning: OPENAI_API_KEY not found. Cloud mode will not work until a key is set.")
+            self.client = None
+        else:
+            self.client = OpenAI(api_key=api_key)
 
     def generate(self, prompt, image_path=None, system_prompt=None, tools=None):
+        if not self.client:
+            return "OpenAI client is not configured. Please set your OPENAI_API_KEY in ~/.mia/secrets.env."
+            
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})

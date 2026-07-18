@@ -1,7 +1,7 @@
 [project]
 name = "mia"
 version = "0.1.0"
-description = "Mia - Local JARVIS for Windows"
+description = "Mia - Local AI Assistant for Windows"
 requires-python = ">=3.11"
 dependencies = [
     "ollama",

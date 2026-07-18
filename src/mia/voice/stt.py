@@ -7,6 +7,7 @@ import threading
 
 class SpeechToText:
     def __init__(self, model_size="small"):
+        self.model_size = model_size
         print(f"Loading faster-whisper {model_size} model...")
         try:
             self.model = WhisperModel(model_size, device="cuda", compute_type="float16")
@@ -52,6 +53,12 @@ class SpeechToText:
         audio_np = np.concatenate(audio_data, axis=0).flatten()
         
         # Transcribe
-        segments, info = self.model.transcribe(audio_np, beam_size=5)
+        try:
+            segments, info = self.model.transcribe(audio_np, beam_size=5)
+        except Exception as e:
+            print(f"GPU Transcription failed (missing CUDA DLLs?). Falling back to CPU. Error: {e}")
+            self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+            segments, info = self.model.transcribe(audio_np, beam_size=5)
+            
         text = "".join([segment.text for segment in segments])
         return text.strip()
