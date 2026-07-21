@@ -58,6 +58,13 @@ class Agent:
                 if name == "respond" and tts_engine:
                     tts_engine.speak(args.get("text", ""))
                     self.memory.add_assistant(args.get("text", ""))
+                elif name != "respond":
+                    import time
+                    time.sleep(1) # wait for UI to settle
+                    verification_img = self.screen.capture_active_monitor()
+                    print(f"Captured verification screenshot: {verification_img}")
+                    self.memory.add_system(f"Action {name} executed. Verification screenshot at {verification_img}")
+                    
             return "Action executed."
         else:
             if tts_engine:

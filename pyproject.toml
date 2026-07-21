@@ -19,7 +19,10 @@ dependencies = [
     "numpy",
     "pillow",
     "python-dotenv",
-    "piper-tts"
+    "piper-tts",
+    "fastapi",
+    "uvicorn",
+    "websockets"
 ]
 
 [build-system]
