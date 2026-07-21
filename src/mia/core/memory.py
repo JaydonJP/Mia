@@ -1,5 +1,5 @@
 class SessionMemory:
-    def __init__(self, max_turns=10):
+    def __init__(self, max_turns=20):
         self.history = []
         self.max_turns = max_turns
         
@@ -10,6 +10,11 @@ class SessionMemory:
     def add_assistant(self, text):
         self.history.append({"role": "assistant", "content": text})
         self._trim()
+    
+    def add_system(self, text):
+        """Log system events (tool results, verification screenshots, etc.)"""
+        self.history.append({"role": "system", "content": text})
+        self._trim()
         
     def _trim(self):
         if len(self.history) > self.max_turns * 2:
@@ -19,3 +24,10 @@ class SessionMemory:
         if not self.history:
             return "No previous conversation."
         return "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.history])
+    
+    def get_history_list(self):
+        """Return structured history for the API."""
+        return list(self.history)
+    
+    def clear(self):
+        self.history = []
