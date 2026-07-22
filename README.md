@@ -7,7 +7,7 @@
 
 <h1 align="center">
   <br>
-  🤖 Mia(!!!UNDER PRODUCTION - NOT FULLY FUNCITONAL!!!)
+  🤖 Mia
   <br>
   <sub><sup>Your Personal JARVIS for Windows</sup></sub>
 </h1>
