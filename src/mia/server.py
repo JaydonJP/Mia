@@ -43,7 +43,7 @@ def load_config():
 class MiaBackend:
     _instance = None
     _lock = threading.Lock()
-    
+
     @classmethod
     def get(cls):
         if cls._instance is None:
@@ -51,7 +51,7 @@ class MiaBackend:
                 if cls._instance is None:
                     cls._instance = cls()
         return cls._instance
-    
+
     def __init__(self):
         self.config = load_config()
         self.mode = self.config.get("llm", {}).get("mode", "local")
@@ -60,31 +60,31 @@ class MiaBackend:
         self.error = None
         self.tts = None
         self.agent = None
-        
+
         # SSE event queues — one per connected client
         self.sse_queues: list[queue.Queue] = []
         self._sse_lock = threading.Lock()
-        
+
         # Initialize in background to not block server startup
         self._init_thread = threading.Thread(target=self._initialize, daemon=True)
         self._init_thread.start()
-    
+
     def _initialize(self):
         try:
             from .core.agent import Agent
             self.agent = Agent(self.config)
             self.agent.router.set_mode(self.mode)
-            
+
             # Subscribe to agent events and forward to SSE clients
             self.agent.event_log.subscribe(self._broadcast_event)
-            
+
             # Try loading TTS (optional)
             try:
                 from .voice.tts import TextToSpeech
                 self.tts = TextToSpeech()
             except Exception:
                 self.tts = None
-            
+
             self.ready = True
             self._broadcast_event({
                 "type": "system",
@@ -98,7 +98,7 @@ class MiaBackend:
                 "data": {"message": f"Initialization error: {e}"},
                 "timestamp": datetime.now().isoformat()
             })
-    
+
     def _broadcast_event(self, event):
         with self._sse_lock:
             dead = []
@@ -109,13 +109,13 @@ class MiaBackend:
                     dead.append(q)
             for q in dead:
                 self.sse_queues.remove(q)
-    
+
     def create_sse_queue(self):
         q = queue.Queue(maxsize=100)
         with self._sse_lock:
             self.sse_queues.append(q)
         return q
-    
+
     def remove_sse_queue(self, q):
         with self._sse_lock:
             if q in self.sse_queues:
@@ -149,6 +149,7 @@ def get_state():
         "error": backend.error,
         "agentState": backend.agent.state if backend.agent else "initializing",
         "hasTTS": backend.tts is not None,
+        "model": backend.agent.router.get_model_name() if backend.agent else "unknown",
     }
 
 
@@ -174,7 +175,6 @@ def set_provider(req: ProviderRequest):
     if req.provider not in ("openai", "anthropic", "gemini"):
         return {"status": "error", "message": "Invalid provider."}
     backend.provider = req.provider
-    # Update config and re-init router's cloud client
     backend.config.setdefault("llm", {}).setdefault("cloud", {})["provider"] = req.provider
     if backend.agent:
         from .llm.router import LLMRouter
@@ -193,8 +193,7 @@ def chat(req: ChatRequest):
     backend = MiaBackend.get()
     if not backend.ready or not backend.agent:
         return {"response": "Mia is still initializing. Please wait a moment."}
-    
-    # Run agent synchronously for now (the SSE stream gives real-time feedback)
+
     try:
         response = backend.agent.process(req.message, tts_engine=backend.tts)
         return {"response": response}
@@ -242,32 +241,37 @@ def get_recent_events():
     return {"events": []}
 
 
+@app.get("/api/tools")
+def get_tools():
+    backend = MiaBackend.get()
+    if backend.agent:
+        return {"tools": backend.agent.executor.list_tools()}
+    return {"tools": []}
+
+
 @app.get("/api/events/stream")
 async def event_stream(request: Request):
     """Server-Sent Events endpoint for real-time activity feed."""
     backend = MiaBackend.get()
     q = backend.create_sse_queue()
-    
+
     async def generate():
         try:
-            # Send initial heartbeat
             yield f"data: {json.dumps({'type': 'connected', 'data': {'message': 'SSE connected'}, 'timestamp': datetime.now().isoformat()})}\n\n"
-            
+
             while True:
-                # Check if client disconnected
                 if await request.is_disconnected():
                     break
-                
+
                 try:
                     event = q.get(timeout=0.5)
                     yield f"data: {json.dumps(event)}\n\n"
                 except queue.Empty:
-                    # Send keepalive every 15 seconds
                     yield f": keepalive\n\n"
-                    
+
         finally:
             backend.remove_sse_queue(q)
-    
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",

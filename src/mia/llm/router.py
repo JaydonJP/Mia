@@ -1,43 +1,88 @@
+"""
+LLM Router — picks the right provider based on the configured mode.
+
+Modes:
+  - local:  Always use Ollama (runs on machine).
+  - cloud:  Always use the configured cloud provider (OpenAI/Anthropic/Gemini).
+  - auto:   Simple heuristic — use local for quick tasks, cloud for complex ones.
+"""
+
+from __future__ import annotations
+
+from .base import LLMProvider, LLMResponse
 from .ollama_client import OllamaClient
 from .openai_client import OpenAIClient
 from .anthropic_client import AnthropicClient
 from .gemini_client import GeminiClient
 
+
 class LLMRouter:
-    def __init__(self, config):
+    def __init__(self, config: dict):
         self.config = config.get("llm", {})
-        self.mode = self.config.get("mode", "local")
-        
-        # Initialize clients
+        self.mode: str = self.config.get("mode", "local")
+
+        # --- Local client ---
         local_cfg = self.config.get("local", {})
+        self.local_client: LLMProvider = OllamaClient(
+            model=local_cfg.get("vision_model", "qwen2.5vl:7b"),
+        )
+
+        # --- Cloud client ---
         cloud_cfg = self.config.get("cloud", {})
-        
-        self.local_client = OllamaClient(model=local_cfg.get("vision_model", "qwen2.5vl:7b"))
-        self.cloud_client = None
-        
+        self.cloud_client: LLMProvider | None = self._build_cloud_client(cloud_cfg)
+
+    @staticmethod
+    def _build_cloud_client(cloud_cfg: dict) -> LLMProvider | None:
         provider = cloud_cfg.get("provider", "openai")
+        model = cloud_cfg.get("model")
+
         if provider == "openai":
-            self.cloud_client = OpenAIClient(model=cloud_cfg.get("model", "gpt-4o"))
+            return OpenAIClient(model=model or "gpt-4o")
         elif provider == "anthropic":
-            self.cloud_client = AnthropicClient(model=cloud_cfg.get("model", "claude-3-5-sonnet-20240620"))
+            return AnthropicClient(model=model or "claude-sonnet-4-20250514")
         elif provider == "gemini":
-            self.cloud_client = GeminiClient(model=cloud_cfg.get("model", "gemini-1.5-pro"))
-            
-    def set_mode(self, mode):
+            return GeminiClient(model=model or "gemini-2.0-flash")
+        return None
+
+    # ------------------------------------------------------------------
+    def set_mode(self, mode: str) -> None:
         self.mode = mode
-        
-    def generate(self, prompt, image_path=None, system_prompt=None, tools=None):
+
+    def get_active_provider(self) -> LLMProvider:
+        """Return the provider that will handle the next request."""
         if self.mode == "cloud" and self.cloud_client:
-            print(f"Routing to Cloud ({self.cloud_client.__class__.__name__})")
-            return self.cloud_client.generate(prompt, image_path, system_prompt, tools)
-        elif self.mode == "auto":
-            # Very basic heuristic: if image is needed or tools are heavily used, use cloud
-            if image_path or tools:
-                print(f"Auto-routing to Cloud ({self.cloud_client.__class__.__name__ if self.cloud_client else 'None'})")
-                if self.cloud_client:
-                    return self.cloud_client.generate(prompt, image_path, system_prompt, tools)
-            print("Auto-routing to Local (simple)")
-            return self.local_client.generate(prompt, image_path, system_prompt, tools)
-        else:
-            print("Routing to Local (Ollama)")
-            return self.local_client.generate(prompt, image_path, system_prompt, tools)
+            return self.cloud_client
+        return self.local_client
+
+    def get_model_name(self) -> str:
+        return self.get_active_provider().model_name
+
+    # ------------------------------------------------------------------
+    def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """Route a chat request to the appropriate provider."""
+
+        if self.mode == "cloud" and self.cloud_client:
+            return self.cloud_client.chat(messages, tools)
+
+        if self.mode == "auto":
+            # Simple heuristic: if there are images in the messages or
+            # the conversation is long (complex), prefer cloud.
+            has_images = any(
+                isinstance(m.get("content"), list)
+                and any(
+                    isinstance(p, dict) and p.get("type") == "image_url"
+                    for p in m["content"]
+                )
+                for m in messages
+            )
+            is_complex = len(messages) > 8
+
+            if (has_images or is_complex) and self.cloud_client:
+                return self.cloud_client.chat(messages, tools)
+
+        # Default: local
+        return self.local_client.chat(messages, tools)

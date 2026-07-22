@@ -1,20 +1,39 @@
 import uiautomation as auto
 import json
+import pythoncom
+
 
 class AccessibilityTree:
     def __init__(self):
         # Set faster timeout for uiautomation
-        auto.SetGlobalSearchTimeout(1)
+        try:
+            auto.SetGlobalSearchTimeout(1)
+        except Exception:
+            pass
+
+    def _ensure_com(self):
+        """Initialize COM on the current thread. Required when called from
+        non-main threads (e.g. FastAPI/uvicorn worker threads)."""
+        try:
+            pythoncom.CoInitialize()
+        except Exception:
+            pass  # Already initialized on this thread
 
     def get_active_window_tree(self):
         """Get a simplified JSON tree of the active window's UI elements."""
-        window = auto.GetForegroundControl()
+        self._ensure_com()
+        
+        try:
+            window = auto.GetForegroundControl()
+        except Exception as e:
+            return {"title": "Unknown", "type": "Unknown", "elements": [], "error": f"COM error: {e}"}
+        
         if not window:
-            return {"error": "No active window found"}
+            return {"title": "Unknown", "type": "Unknown", "elements": []}
 
         tree = {
-            "title": window.Name,
-            "type": window.ControlTypeName,
+            "title": window.Name or "Untitled",
+            "type": window.ControlTypeName or "Unknown",
             "elements": []
         }
 
@@ -27,10 +46,17 @@ class AccessibilityTree:
                 if control.ControlTypeName in ['ButtonControl', 'EditControl', 'TextControl', 'DocumentControl', 'TabItemControl', 'ListItemControl', 'HyperlinkControl']:
                     # Filter out empty elements to save tokens
                     if control.Name and control.Name.strip():
+                        value = None
+                        try:
+                            vp = control.GetValuePattern()
+                            if vp:
+                                value = vp.Value
+                        except Exception:
+                            pass
                         tree["elements"].append({
                             "name": control.Name,
                             "type": control.ControlTypeName.replace("Control", ""),
-                            "value": control.GetValuePattern().Value if hasattr(control, "GetValuePattern") and control.GetValuePattern() else None
+                            "value": value
                         })
         except Exception as e:
             tree["error"] = f"Failed to traverse tree: {e}"

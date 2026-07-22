@@ -1,18 +1,72 @@
+"""
+Safe PowerShell command execution with an allowlist.
+"""
+
+from __future__ import annotations
+
 import subprocess
 
-def run_powershell(cmd: str):
-    # Simple allowlist for safety
-    safe_prefixes = ["dir", "ls", "echo", "Get-Process", "Get-Date", "ping", "ipconfig"]
-    is_safe = any(cmd.strip().startswith(prefix) for prefix in safe_prefixes)
+# Commands considered safe for automatic execution
+SAFE_PREFIXES = [
+    # File system queries
+    "dir", "ls", "Get-ChildItem", "Get-Item", "Get-Content", "Test-Path",
+    "Resolve-Path",
+    # File operations (create, copy, move — NOT delete)
+    "New-Item", "Copy-Item", "Move-Item", "Set-Content",
+    # System info
+    "Get-Process", "Get-Date", "Get-ComputerInfo", "systeminfo",
+    "Get-Volume", "Get-Disk",
+    # Network
+    "ping", "ipconfig", "nslookup", "Test-NetConnection",
+    # Misc safe
+    "echo", "Write-Output", "hostname", "whoami",
+]
+
+# Explicitly blocked patterns (even if they start with a safe prefix)
+BLOCKED_PATTERNS = [
+    "Remove-Item", "Remove-", "Delete", "Format-",
+    "Stop-Process", "Stop-Computer", "Restart-Computer",
+    "Invoke-WebRequest", "Invoke-RestMethod", "Start-Process",
+    "Set-ExecutionPolicy", "Disable-", "Enable-",
+    "rm ", "rm\t", "del ", "del\t", "rmdir",
+]
+
+
+def run_powershell(cmd: str) -> str:
+    """Run a PowerShell command if it passes the safety check."""
+    stripped = cmd.strip()
+
+    # Check blocked patterns first
+    for pattern in BLOCKED_PATTERNS:
+        if pattern.lower() in stripped.lower():
+            return f"Command blocked by safety policy: contains '{pattern}'. Use a safe command or ask the user to run it manually."
+
+    # Check if command starts with an allowed prefix
+    is_safe = any(
+        stripped.startswith(prefix) or stripped.lower().startswith(prefix.lower())
+        for prefix in SAFE_PREFIXES
+    )
     if not is_safe:
-        return f"Command '{cmd}' blocked by safety policy. Only safe commands are allowed in auto mode."
-        
+        return (
+            f"Command '{stripped[:60]}...' blocked by safety policy. "
+            f"Allowed prefixes: {', '.join(SAFE_PREFIXES[:8])}..."
+        )
+
     try:
-        result = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         out = result.stdout if result.returncode == 0 else result.stderr
-        # Truncate if too long
-        if len(out) > 2000:
-            out = out[:2000] + "\n...[truncated]"
+        if not out.strip():
+            out = "(no output)" if result.returncode == 0 else f"Exit code: {result.returncode}"
+        # Truncate
+        if len(out) > 3000:
+            out = out[:3000] + "\n...[truncated]"
         return out
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 15 seconds."
     except Exception as e:
         return f"Shell execution failed: {e}"

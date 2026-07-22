@@ -1,60 +1,80 @@
-from .base import LLMProvider
+"""
+OpenAI LLM client — GPT-4o and compatible models.
+
+Supports vision (image_url in content), native tool calling, and
+multi-turn conversations with tool results.
+"""
+
+from __future__ import annotations
+
 import os
-import base64
-from openai import OpenAI
+import json
+from .base import LLMProvider, LLMResponse, ToolCall
+
 
 class OpenAIClient(LLMProvider):
-    def __init__(self, model="gpt-4o"):
-        self.model = model
-        # Try to load API key from secrets file if it exists
+    def __init__(self, model: str = "gpt-4o"):
+        self._model = model
+        self.client = None
+
         from dotenv import load_dotenv
         secrets_path = os.path.expanduser("~/.mia/secrets.env")
         if os.path.exists(secrets_path):
             load_dotenv(secrets_path)
-            
+
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            print("Warning: OPENAI_API_KEY not found. Cloud mode will not work until a key is set.")
-            self.client = None
+            print("[OpenAI] Warning: OPENAI_API_KEY not found. Set it in ~/.mia/secrets.env")
         else:
+            from openai import OpenAI
             self.client = OpenAI(api_key=api_key)
 
-    def generate(self, prompt, image_path=None, system_prompt=None, tools=None):
-        if not self.client:
-            return "OpenAI client is not configured. Please set your OPENAI_API_KEY in ~/.mia/secrets.env."
-            
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-            
-        content = [{"type": "text", "text": prompt}]
-        
-        if image_path and os.path.exists(image_path):
-            try:
-                with open(image_path, "rb") as f:
-                    img_data = base64.b64encode(f.read()).decode('utf-8')
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}
-                })
-            except Exception as e:
-                print(f"Failed to read image for OpenAI: {e}")
+    @property
+    def model_name(self) -> str:
+        return f"OpenAI ({self._model})"
 
-        messages.append({"role": "user", "content": content})
-        
-        kwargs = {
-            "model": self.model,
-            "messages": messages,
+    def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        if not self.client:
+            return LLMResponse(
+                text="OpenAI client not configured. Set OPENAI_API_KEY in ~/.mia/secrets.env"
+            )
+
+        kwargs: dict = {
+            "model": self._model,
+            "messages": messages,  # OpenAI already uses this format natively
         }
-        
         if tools:
             kwargs["tools"] = tools
-            
+
         try:
             response = self.client.chat.completions.create(**kwargs)
             message = response.choices[0].message
+
+            # --- Tool calls ---
             if message.tool_calls:
-                return message.tool_calls
-            return message.content
+                tool_calls = []
+                for tc in message.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    tool_calls.append(ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=args,
+                    ))
+                return LLMResponse(
+                    text=message.content,
+                    tool_calls=tool_calls,
+                    raw=response,
+                )
+
+            # --- Plain text ---
+            return LLMResponse(text=message.content or "", raw=response)
+
         except Exception as e:
-            return f"OpenAI error: {e}"
+            return LLMResponse(text=f"[OpenAI error] {e}")

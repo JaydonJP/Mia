@@ -1,28 +1,47 @@
 [project]
 name = "mia"
-version = "0.1.0"
-description = "Mia - Local AI Assistant for Windows"
+version = "0.2.0"
+description = "Mia - JARVIS-like AI Desktop Assistant for Windows"
 requires-python = ">=3.11"
 dependencies = [
+    # LLM providers
     "ollama",
     "openai",
     "anthropic",
     "google-genai",
+
+    # Voice
     "faster-whisper",
-    "uiautomation",
-    "pywinauto",
-    "mss",
-    "keyboard",
-    "pystray",
-    "pyyaml",
+    "piper-tts",
     "sounddevice",
     "numpy",
+
+    # UI Automation
+    "uiautomation",
+    "pywinauto",
+    "keyboard",
+
+    # Screen capture
+    "mss",
     "pillow",
+
+    # Terminal UI
+    "rich",
+
+    # Web search
+    "ddgs",
+
+    # System tray
+    "pystray",
+
+    # Config & environment
+    "pyyaml",
     "python-dotenv",
-    "piper-tts",
+
+    # Server (optional)
     "fastapi",
     "uvicorn",
-    "websockets"
+    "websockets",
 ]
 
 [build-system]

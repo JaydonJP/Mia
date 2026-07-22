@@ -1,5 +1,6 @@
 import keyboard
 import uiautomation as auto
+import pythoncom
 import time
 
 def type_text(text: str):
@@ -11,6 +12,11 @@ def hotkey(keys: str):
     return f"Pressed hotkey: {keys}"
     
 def click_element(name: str):
+    try:
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    
     window = auto.GetForegroundControl()
     if not window:
         return "No active window to click in."

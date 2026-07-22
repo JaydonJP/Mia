@@ -1,0 +1,59 @@
+# Mia Workflows
+# Each workflow is a named automation sequence.
+# Actions are executed in order with a configurable delay between each.
+#
+# Action types:
+#   - launch_app: Launch an application by name
+#   - open_url:   Open a URL in the default browser
+#
+# Customize these to match your setup!
+
+workflows:
+  study_mode:
+    description: "Open study apps — Notion, Spotify (lo-fi), and Google Scholar"
+    actions:
+      - type: launch_app
+        target: notion
+        delay: 2
+      - type: launch_app
+        target: spotify
+        delay: 2
+      - type: open_url
+        target: "https://scholar.google.com"
+        delay: 1
+
+  work_mode:
+    description: "Open work apps — VS Code, Slack, and Gmail"
+    actions:
+      - type: launch_app
+        target: vscode
+        delay: 2
+      - type: launch_app
+        target: slack
+        delay: 2
+      - type: open_url
+        target: "https://mail.google.com"
+        delay: 1
+
+  chill_mode:
+    description: "Open entertainment — Spotify and YouTube"
+    actions:
+      - type: launch_app
+        target: spotify
+        delay: 2
+      - type: open_url
+        target: "https://youtube.com"
+        delay: 1
+
+  coding_mode:
+    description: "Open coding environment — VS Code, Terminal, and GitHub"
+    actions:
+      - type: launch_app
+        target: vscode
+        delay: 2
+      - type: launch_app
+        target: terminal
+        delay: 2
+      - type: open_url
+        target: "https://github.com"
+        delay: 1
