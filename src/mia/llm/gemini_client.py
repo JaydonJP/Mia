@@ -9,23 +9,20 @@ from __future__ import annotations
 
 import os
 import json
-import uuid
 from .base import LLMProvider, LLMResponse, ToolCall
+from .secrets import load_secrets_env
 
 
 class GeminiClient(LLMProvider):
-    def __init__(self, model: str = "gemini-2.0-flash"):
+    def __init__(self, model: str = "gemini-3.5-flash"):
         self._model = model
         self.client = None
 
-        from dotenv import load_dotenv
-        secrets_path = os.path.expanduser("~/.mia/secrets.env")
-        if os.path.exists(secrets_path):
-            load_dotenv(secrets_path)
+        load_secrets_env()
 
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            print("[Gemini] Warning: GEMINI_API_KEY not found. Set it in ~/.mia/secrets.env")
+            print("[Gemini] Warning: GEMINI_API_KEY not found. Set it in ~/.mia/secrets.env, config/secrets.env, or .env")
         else:
             try:
                 from google import genai
@@ -44,7 +41,7 @@ class GeminiClient(LLMProvider):
     ) -> LLMResponse:
         if not self.client:
             return LLMResponse(
-                text="Gemini client not configured. Set GEMINI_API_KEY in ~/.mia/secrets.env"
+                text="Gemini client not configured. Set GEMINI_API_KEY in ~/.mia/secrets.env, config/secrets.env, or .env"
             )
 
         try:
@@ -87,6 +84,10 @@ class GeminiClient(LLMProvider):
                 ))
                 continue
 
+            if role == "assistant" and msg.get("metadata", {}).get("gemini_content") is not None:
+                contents.append(msg["metadata"]["gemini_content"])
+                continue
+
             # Handle multimodal content
             if isinstance(content, list):
                 parts = []
@@ -108,24 +109,6 @@ class GeminiClient(LLMProvider):
                     elif isinstance(part, str):
                         parts.append(types.Part.from_text(text=part))
                 contents.append(types.Content(role=gemini_role, parts=parts))
-            elif role == "assistant" and msg.get("tool_calls"):
-                # Reconstruct function call parts for the model's previous turn
-                parts = []
-                if content:
-                    parts.append(types.Part.from_text(text=str(content)))
-                for tc in msg["tool_calls"]:
-                    fn = tc.get("function", {})
-                    fn_args = fn.get("arguments", {})
-                    if isinstance(fn_args, str):
-                        try:
-                            fn_args = json.loads(fn_args)
-                        except json.JSONDecodeError:
-                            fn_args = {}
-                    parts.append(types.Part.from_function_call(
-                        name=fn["name"],
-                        args=fn_args,
-                    ))
-                contents.append(types.Content(role="model", parts=parts))
             else:
                 contents.append(types.Content(
                     role=gemini_role,
@@ -187,15 +170,17 @@ class GeminiClient(LLMProvider):
             text_parts = []
             tool_calls = []
 
+            raw_content = None
             if response.candidates:
-                for part in response.candidates[0].content.parts:
+                raw_content = response.candidates[0].content
+                for part in raw_content.parts:
                     if part.text:
                         text_parts.append(part.text)
                     elif part.function_call:
                         fc = part.function_call
                         args = dict(fc.args) if fc.args else {}
                         tool_calls.append(ToolCall(
-                            id=str(uuid.uuid4())[:8],
+                            id=getattr(fc, "id", None) or f"gemini_{len(tool_calls) + 1}",
                             name=fc.name,
                             arguments=args,
                         ))
@@ -204,6 +189,7 @@ class GeminiClient(LLMProvider):
                 text="\n".join(text_parts) if text_parts else None,
                 tool_calls=tool_calls,
                 raw=response,
+                metadata={"gemini_content": raw_content} if raw_content is not None else {},
             )
 
         except Exception as e:

@@ -41,12 +41,22 @@ class LLMRouter:
         elif provider == "anthropic":
             return AnthropicClient(model=model or "claude-sonnet-4-20250514")
         elif provider == "gemini":
-            return GeminiClient(model=model or "gemini-2.0-flash")
+            return GeminiClient(model=model or "gemini-3.5-flash")
         return None
 
     # ------------------------------------------------------------------
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def set_cloud_provider(self, provider: str) -> None:
+        cloud_cfg = self.config.setdefault("cloud", {})
+        cloud_cfg["provider"] = provider
+        self.cloud_client = self._build_cloud_client(cloud_cfg)
+
+    def set_cloud_model(self, model: str) -> None:
+        cloud_cfg = self.config.setdefault("cloud", {})
+        cloud_cfg["model"] = model
+        self.cloud_client = self._build_cloud_client(cloud_cfg)
 
     def get_active_provider(self) -> LLMProvider:
         """Return the provider that will handle the next request."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import json
 from .base import LLMProvider, LLMResponse, ToolCall
+from .secrets import load_secrets_env
 
 
 class OpenAIClient(LLMProvider):
@@ -17,14 +18,11 @@ class OpenAIClient(LLMProvider):
         self._model = model
         self.client = None
 
-        from dotenv import load_dotenv
-        secrets_path = os.path.expanduser("~/.mia/secrets.env")
-        if os.path.exists(secrets_path):
-            load_dotenv(secrets_path)
+        load_secrets_env()
 
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            print("[OpenAI] Warning: OPENAI_API_KEY not found. Set it in ~/.mia/secrets.env")
+            print("[OpenAI] Warning: OPENAI_API_KEY not found. Set it in ~/.mia/secrets.env, config/secrets.env, or .env")
         else:
             from openai import OpenAI
             self.client = OpenAI(api_key=api_key)
@@ -40,7 +38,7 @@ class OpenAIClient(LLMProvider):
     ) -> LLMResponse:
         if not self.client:
             return LLMResponse(
-                text="OpenAI client not configured. Set OPENAI_API_KEY in ~/.mia/secrets.env"
+                text="OpenAI client not configured. Set OPENAI_API_KEY in ~/.mia/secrets.env, config/secrets.env, or .env"
             )
 
         kwargs: dict = {

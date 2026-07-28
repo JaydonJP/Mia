@@ -2,10 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+import copy
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mia.__main__ import _try_direct_tool_call
+from mia.__main__ import _choose_gemini_model, _try_direct_tool_call
 from mia.actions import files
 from mia.actions.executor import setup_executor
 from mia.actions.shell import run_powershell
@@ -25,7 +26,7 @@ class FakeRouter:
         return "Mock"
 
     def chat(self, messages, tools=None):
-        self.messages_seen.append(messages)
+        self.messages_seen.append(copy.deepcopy(messages))
         return self.responses.pop(0)
 
     def set_mode(self, mode):
@@ -37,7 +38,7 @@ class FakeCloudRouter(FakeRouter):
         super().__init__([LLMResponse(text="ok")], mode="cloud")
 
     def get_model_name(self):
-        return "Gemini (gemini-2.0-flash)"
+        return "Gemini (gemini-3.5-flash)"
 
 
 class FakeA11y:
@@ -77,6 +78,18 @@ class FakeAgent:
         self.executor = setup_executor()
 
 
+class FakePromptConsole:
+    def __init__(self, response):
+        self.response = response
+        self.console = self
+
+    def print(self, *args, **kwargs):
+        pass
+
+    def input(self, prompt):
+        return self.response
+
+
 class CoreBehaviorTests(unittest.TestCase):
     def test_executor_exposes_readme_tool_count(self):
         executor = setup_executor()
@@ -110,6 +123,14 @@ class CoreBehaviorTests(unittest.TestCase):
         agent = FakeAgent()
         result = _try_direct_tool_call(agent, 'respond {"text": "JSON works"}')
         self.assertEqual(result, "JSON works")
+
+    def test_choose_gemini_model_accepts_numbered_choice(self):
+        selected = _choose_gemini_model(FakePromptConsole("2"), "gemini-3.5-flash")
+        self.assertEqual(selected, "gemini-3.5-flash")
+
+    def test_choose_gemini_model_rejects_unknown_choice(self):
+        selected = _choose_gemini_model(FakePromptConsole("nope"), "gemini-3.5-flash")
+        self.assertEqual(selected, "")
 
     def test_file_sandbox_blocks_prefix_sibling(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -148,6 +169,54 @@ class CoreBehaviorTests(unittest.TestCase):
                 agent.executor.execute = lambda name, args: "Success"
 
                 self.assertEqual(agent.process("open spotify"), "Opening Spotify now.")
+            finally:
+                agent.db.close()
+
+    def test_agent_does_not_replay_previous_turns_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent({"database": {"path": str(Path(tmp) / "mia.db")}})
+            try:
+                agent.screen = None
+                agent.a11y = None
+                router = FakeRouter([
+                    LLMResponse(tool_calls=[ToolCall(id="1", name="respond", arguments={"text": "first"})]),
+                    LLMResponse(tool_calls=[ToolCall(id="2", name="respond", arguments={"text": "second"})]),
+                ])
+                agent.router = router
+                agent.executor.execute = lambda name, args: args.get("text", "ok")
+
+                self.assertEqual(agent.process("open spotify"), "first")
+                self.assertEqual(agent.process("hi"), "second")
+
+                second_turn_messages = router.messages_seen[1]
+                self.assertEqual(len(second_turn_messages), 2)
+                self.assertEqual(second_turn_messages[1]["role"], "user")
+            finally:
+                agent.db.close()
+
+    def test_agent_keeps_provider_metadata_between_tool_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent({"database": {"path": str(Path(tmp) / "mia.db")}})
+            try:
+                agent.screen = None
+                agent.a11y = None
+                router = FakeRouter([
+                    LLMResponse(
+                        tool_calls=[ToolCall(id="1", name="launch_app", arguments={"name": "spotify"})],
+                        metadata={"gemini_content": object()},
+                    ),
+                    LLMResponse(tool_calls=[ToolCall(id="2", name="respond", arguments={"text": "done"})]),
+                ])
+                agent.router = router
+                agent.executor.execute = lambda name, args: "Success"
+
+                self.assertEqual(agent.process("open spotify"), "done")
+
+                second_step_messages = router.messages_seen[1]
+                assistant_message = second_step_messages[2]
+                self.assertEqual(assistant_message["role"], "assistant")
+                self.assertIn("metadata", assistant_message)
+                self.assertIn("gemini_content", assistant_message["metadata"])
             finally:
                 agent.db.close()
 

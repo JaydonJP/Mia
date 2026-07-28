@@ -357,7 +357,7 @@ llm:
     vision_model: qwen2.5vl:3b   # or :7b for better quality
   cloud:
     provider: gemini   # openai | anthropic | gemini
-    model: gemini-2.0-flash
+    model: gemini-3.5-flash
 
 voice:
   push_to_talk_key: right ctrl

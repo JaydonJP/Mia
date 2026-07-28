@@ -11,6 +11,7 @@ import os
 import json
 import uuid
 from .base import LLMProvider, LLMResponse, ToolCall
+from .secrets import load_secrets_env
 
 
 class AnthropicClient(LLMProvider):
@@ -18,14 +19,11 @@ class AnthropicClient(LLMProvider):
         self._model = model
         self.client = None
 
-        from dotenv import load_dotenv
-        secrets_path = os.path.expanduser("~/.mia/secrets.env")
-        if os.path.exists(secrets_path):
-            load_dotenv(secrets_path)
+        load_secrets_env()
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            print("[Anthropic] Warning: ANTHROPIC_API_KEY not found. Set it in ~/.mia/secrets.env")
+            print("[Anthropic] Warning: ANTHROPIC_API_KEY not found. Set it in ~/.mia/secrets.env, config/secrets.env, or .env")
         else:
             try:
                 from anthropic import Anthropic
@@ -44,7 +42,7 @@ class AnthropicClient(LLMProvider):
     ) -> LLMResponse:
         if not self.client:
             return LLMResponse(
-                text="Anthropic client not configured. Set ANTHROPIC_API_KEY in ~/.mia/secrets.env"
+                text="Anthropic client not configured. Set ANTHROPIC_API_KEY in ~/.mia/secrets.env, config/secrets.env, or .env"
             )
 
         # --- Separate system prompt from messages ---

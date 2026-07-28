@@ -84,9 +84,11 @@ MAX_TOOL_STEPS = 10  # Safety cap for the ReAct loop
 class Agent:
     def __init__(self, config: dict):
         self.config = config
+        memory_cfg = config.get("memory", {}) if isinstance(config, dict) else {}
         db_path = config.get("database", {}).get("path") if isinstance(config, dict) else None
         self.db = MiaDatabase(db_path=db_path)
         self.memory = SessionMemory(database=self.db)
+        self.include_conversation_history = bool(memory_cfg.get("include_history_in_prompt", False))
         self.executor = setup_executor()
         self.router = LLMRouter(config)
         try:
@@ -212,10 +214,12 @@ class Agent:
             {"role": "system", "content": system_prompt},
         ]
 
-        # Add conversation history (previous turns)
-        for msg in self.memory.get_messages()[:-1]:  # Exclude the user msg we just added
-            if msg["role"] in ("user", "assistant"):
-                messages.append(msg)
+        # Conversation history is disabled by default for lower token usage and
+        # to keep tool-calling turns isolated from later prompts.
+        if self.include_conversation_history:
+            for msg in self.memory.get_messages()[:-1]:
+                if msg["role"] in ("user", "assistant"):
+                    messages.append(msg)
 
         # Add current user message with available screen/accessibility context.
         messages.append(self._build_current_user_message(user_text))
@@ -261,6 +265,8 @@ class Agent:
                         for tc in llm_response.tool_calls
                     ],
                 }
+                if llm_response.metadata:
+                    assistant_msg["metadata"] = llm_response.metadata
                 messages.append(assistant_msg)
 
                 # Execute each tool call and feed results back

@@ -27,6 +27,7 @@ class LLMResponse:
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     raw: Any = None  # provider-specific raw response for debugging
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_tool_calls(self) -> bool:

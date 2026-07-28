@@ -16,12 +16,76 @@ import yaml
 from pathlib import Path
 
 
+GEMINI_FREE_TIER_MODELS = [
+    {"id": "gemini-3.6-flash", "summary": "Newest general-purpose Flash model."},
+    {"id": "gemini-3.5-flash", "summary": "Higher capability Flash model for coding and agentic work."},
+    {"id": "gemini-3.5-flash-lite", "summary": "Cheaper and faster 3.5 option."},
+    {"id": "gemini-3.1-flash-lite", "summary": "Older low-cost Flash-Lite fallback."},
+]
+
+
 def load_config() -> dict:
     config_path = Path(__file__).parent.parent.parent / "config" / "mia.yaml"
     if config_path.exists():
         with open(config_path, "r") as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
+def save_config(config: dict) -> None:
+    config_path = Path(__file__).parent.parent.parent / "config" / "mia.yaml"
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=False)
+
+
+def _get_current_cloud_model(config: dict) -> str:
+    return config.get("llm", {}).get("cloud", {}).get("model", "")
+
+
+def _choose_gemini_model(console, current_model: str) -> str | None:
+    console.console.print("\n [bold cyan]Gemini free-tier cloud models[/]")
+    console.console.print(" [dim]Source: Google Gemini Developer API pricing docs, last updated July 21, 2026.[/]")
+
+    for index, option in enumerate(GEMINI_FREE_TIER_MODELS, start=1):
+        marker = " [bold green](current)[/]" if option["id"] == current_model else ""
+        console.console.print(f"   {index}. {option['id']} - {option['summary']}{marker}")
+
+    raw = console.console.input(
+        "\n [bold white]Choose model number or exact model id (Enter to cancel) >[/] "
+    ).strip()
+    if not raw:
+        return None
+
+    if raw.isdigit():
+        index = int(raw) - 1
+        if 0 <= index < len(GEMINI_FREE_TIER_MODELS):
+            return GEMINI_FREE_TIER_MODELS[index]["id"]
+        return ""
+
+    for option in GEMINI_FREE_TIER_MODELS:
+        if raw == option["id"]:
+            return raw
+    return ""
+
+
+def _switch_gemini_model(agent, console, config: dict) -> None:
+    selected_model = _choose_gemini_model(console, _get_current_cloud_model(config))
+    if selected_model is None:
+        console.log("System", "Model switch cancelled.")
+        return
+    if not selected_model:
+        console.print_error("Invalid selection. Use a listed number or exact model id.")
+        return
+
+    config.setdefault("llm", {}).setdefault("cloud", {})["provider"] = "gemini"
+    config["llm"]["cloud"]["model"] = selected_model
+    save_config(config)
+
+    agent.router.set_cloud_provider("gemini")
+    agent.router.set_cloud_model(selected_model)
+    console.log("System", "Cloud provider set to: gemini")
+    console.log("System", f"Cloud model switched to: {selected_model}")
+    console.log("System", "Saved to config/mia.yaml")
 
 
 def run_cli(config: dict, mode_override: str | None = None):
@@ -54,10 +118,11 @@ def run_cli(config: dict, mode_override: str | None = None):
         model=agent.router.get_model_name(),
     )
 
-    # Load recent context from DB
-    agent.memory.load_from_db(n=6)
-    if agent.memory.history:
-        console.log("System", f"Loaded {len(agent.memory.history)} messages from previous sessions")
+    # Load recent context from DB only when prompt history replay is enabled.
+    if agent.include_conversation_history:
+        agent.memory.load_from_db(n=6)
+        if agent.memory.history:
+            console.log("System", f"Loaded {len(agent.memory.history)} messages from previous sessions")
 
     # REPL loop
     while True:
@@ -89,6 +154,10 @@ def run_cli(config: dict, mode_override: str | None = None):
         if cmd == "model":
             console.log("System", f"Mode: {agent.router.mode}")
             console.log("System", f"Model: {agent.router.get_model_name()}")
+            continue
+
+        if cmd == "switch_model":
+            _switch_gemini_model(agent, console, config)
             continue
 
         if cmd == "clear":
