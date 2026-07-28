@@ -1,9 +1,9 @@
 """
-File system operations — sandboxed to user-approved directories.
+File system operations - sandboxed to user-approved directories.
 
 The allowed directories are configured in ``config/mia.yaml`` under
-``filesystem.allowed_dirs``.  If no config is present, defaults to the
-user's home directory.
+``filesystem.allowed_dirs``. If no config is present, the user's home
+directory and Mia's launch directory are allowed.
 """
 
 from __future__ import annotations
@@ -12,11 +12,7 @@ import os
 from pathlib import Path
 
 
-# ------------------------------------------------------------------
-# Safety: Allowed directory check
-# ------------------------------------------------------------------
-
-_ALLOWED_DIRS: list[str] | None = None  # Lazy-loaded from config
+_ALLOWED_DIRS: list[str] | None = None
 
 
 def _get_allowed_dirs() -> list[str]:
@@ -24,13 +20,13 @@ def _get_allowed_dirs() -> list[str]:
     if _ALLOWED_DIRS is not None:
         return _ALLOWED_DIRS
 
-    # Try loading from config
     try:
         import yaml
-        config_path = Path(__file__).parent.parent.parent.parent / "config" / "mia.yaml"
+
+        config_path = Path(__file__).resolve().parents[3] / "config" / "mia.yaml"
         if config_path.exists():
-            with open(config_path, "r") as f:
-                cfg = yaml.safe_load(f)
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
             dirs = cfg.get("filesystem", {}).get("allowed_dirs", [])
             _ALLOWED_DIRS = [os.path.expandvars(os.path.expanduser(d)) for d in dirs]
         else:
@@ -38,29 +34,40 @@ def _get_allowed_dirs() -> list[str]:
     except Exception:
         _ALLOWED_DIRS = []
 
-    # Default fallback: user's home
-    if not _ALLOWED_DIRS:
-        _ALLOWED_DIRS = [os.path.expanduser("~")]
+    for default_dir in (os.path.expanduser("~"), os.getcwd()):
+        if default_dir not in _ALLOWED_DIRS:
+            _ALLOWED_DIRS.append(default_dir)
 
     return _ALLOWED_DIRS
 
 
 def _is_path_allowed(path: str) -> bool:
-    """Check if the resolved path falls within allowed directories."""
-    resolved = os.path.realpath(path)
+    """Check if the resolved path falls within an allowed directory."""
+    resolved = os.path.normcase(os.path.realpath(path))
     for allowed in _get_allowed_dirs():
-        if resolved.startswith(os.path.realpath(allowed)):
-            return True
+        allowed_real = os.path.normcase(os.path.realpath(allowed))
+        try:
+            if os.path.commonpath([resolved, allowed_real]) == allowed_real:
+                return True
+        except ValueError:
+            continue
     return False
 
 
-# ------------------------------------------------------------------
-# File operations
-# ------------------------------------------------------------------
+def _expand_path(path: str) -> str:
+    if not path or path.strip() in {".", ""}:
+        return os.getcwd()
+    return os.path.expandvars(os.path.expanduser(path))
+
+
+def _parent_for_write(path: str) -> str:
+    parent = os.path.dirname(path)
+    return parent if parent else os.getcwd()
+
 
 def list_directory(path: str) -> str:
     """List files and folders in a directory."""
-    path = os.path.expandvars(os.path.expanduser(path))
+    path = _expand_path(path)
     if not _is_path_allowed(path):
         return f"Access denied: '{path}' is outside allowed directories."
     if not os.path.isdir(path):
@@ -72,20 +79,18 @@ def list_directory(path: str) -> str:
             return f"Directory '{path}' is empty."
 
         lines = []
-        for entry in entries[:100]:  # Cap at 100 entries
+        for entry in entries[:100]:
             full = os.path.join(path, entry)
             if os.path.isdir(full):
-                lines.append(f"  📁 {entry}/")
+                lines.append(f"  [DIR]  {entry}/")
             else:
-                size = os.path.getsize(full)
-                size_str = _human_size(size)
-                lines.append(f"  📄 {entry}  ({size_str})")
+                size_str = _human_size(os.path.getsize(full))
+                lines.append(f"  [FILE] {entry}  ({size_str})")
 
         header = f"Contents of {path} ({len(entries)} items):"
         if len(entries) > 100:
             header += f" (showing first 100 of {len(entries)})"
         return header + "\n" + "\n".join(lines)
-
     except PermissionError:
         return f"Permission denied: cannot read '{path}'."
     except Exception as e:
@@ -93,8 +98,8 @@ def list_directory(path: str) -> str:
 
 
 def read_file(path: str) -> str:
-    """Read the contents of a text file (up to 10,000 chars)."""
-    path = os.path.expandvars(os.path.expanduser(path))
+    """Read the contents of a text file."""
+    path = _expand_path(path)
     if not _is_path_allowed(path):
         return f"Access denied: '{path}' is outside allowed directories."
     if not os.path.isfile(path):
@@ -102,7 +107,7 @@ def read_file(path: str) -> str:
 
     try:
         size = os.path.getsize(path)
-        if size > 500_000:  # 500 KB limit
+        if size > 500_000:
             return f"File too large ({_human_size(size)}). Maximum is 500 KB."
 
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -110,7 +115,6 @@ def read_file(path: str) -> str:
 
         truncated = " ...[truncated]" if size > 10_000 else ""
         return f"Contents of {os.path.basename(path)}:\n\n{content}{truncated}"
-
     except PermissionError:
         return f"Permission denied: cannot read '{path}'."
     except Exception as e:
@@ -119,12 +123,12 @@ def read_file(path: str) -> str:
 
 def write_file(path: str, content: str) -> str:
     """Write content to a file. Creates parent directories if needed."""
-    path = os.path.expandvars(os.path.expanduser(path))
+    path = _expand_path(path)
     if not _is_path_allowed(path):
         return f"Access denied: '{path}' is outside allowed directories."
 
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(_parent_for_write(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return f"Written {len(content)} chars to {path}"
@@ -135,8 +139,8 @@ def write_file(path: str, content: str) -> str:
 
 
 def create_directory(path: str) -> str:
-    """Create a directory (and parents if needed)."""
-    path = os.path.expandvars(os.path.expanduser(path))
+    """Create a directory and its parents if needed."""
+    path = _expand_path(path)
     if not _is_path_allowed(path):
         return f"Access denied: '{path}' is outside allowed directories."
 
@@ -148,10 +152,6 @@ def create_directory(path: str) -> str:
     except Exception as e:
         return f"Error creating directory: {e}"
 
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
 
 def _human_size(size: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):

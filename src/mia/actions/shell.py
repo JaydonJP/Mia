@@ -5,6 +5,7 @@ Safe PowerShell command execution with an allowlist.
 from __future__ import annotations
 
 import subprocess
+import re
 
 # Commands considered safe for automatic execution
 SAFE_PREFIXES = [
@@ -31,10 +32,18 @@ BLOCKED_PATTERNS = [
     "rm ", "rm\t", "del ", "del\t", "rmdir",
 ]
 
+CHAINING_PATTERNS = [";", "|", "&&", "||"]
+
 
 def run_powershell(cmd: str) -> str:
     """Run a PowerShell command if it passes the safety check."""
     stripped = cmd.strip()
+    if not stripped:
+        return "Command blocked by safety policy: empty command."
+
+    for pattern in CHAINING_PATTERNS:
+        if pattern in stripped:
+            return f"Command blocked by safety policy: command chaining is not allowed ('{pattern}')."
 
     # Check blocked patterns first
     for pattern in BLOCKED_PATTERNS:
@@ -42,10 +51,8 @@ def run_powershell(cmd: str) -> str:
             return f"Command blocked by safety policy: contains '{pattern}'. Use a safe command or ask the user to run it manually."
 
     # Check if command starts with an allowed prefix
-    is_safe = any(
-        stripped.startswith(prefix) or stripped.lower().startswith(prefix.lower())
-        for prefix in SAFE_PREFIXES
-    )
+    command_name = re.split(r"\s+", stripped, maxsplit=1)[0]
+    is_safe = any(command_name.lower() == prefix.lower() for prefix in SAFE_PREFIXES)
     if not is_safe:
         return (
             f"Command '{stripped[:60]}...' blocked by safety policy. "

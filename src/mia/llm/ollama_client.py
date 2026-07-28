@@ -28,7 +28,8 @@ class OllamaClient(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> LLMResponse:
-        import ollama
+        from ollama import Client
+        client = Client(host="http://127.0.0.1:11434")
 
         # Ollama expects its own message format — mostly OpenAI-compatible
         # but images go in a top-level "images" key per message.
@@ -40,7 +41,7 @@ class OllamaClient(LLMProvider):
 
         try:
             try:
-                response = ollama.chat(
+                response = client.chat(
                     model=self._model,
                     messages=ollama_messages,
                     **kwargs,
@@ -49,9 +50,31 @@ class OllamaClient(LLMProvider):
                 if "does not support tools" in str(e) and tools:
                     # Model doesn't support native tool calling — retry without tools
                     kwargs.pop("tools", None)
-                    response = ollama.chat(
+                    
+                    tool_instructions = (
+                        "CRITICAL INSTRUCTION: You are an AI assistant that uses tools to perform actions.\n"
+                        "You have access to the following tools:\n"
+                        + json.dumps([t["function"] for t in tools], indent=2) + "\n\n"
+                        "To use a tool, you MUST output EXACTLY this XML format:\n"
+                        "<tool_call>{\"name\": \"tool_name\", \"arguments\": {\"arg_name\": \"value\"}}</tool_call>\n\n"
+                        "Do not just say 'Opening app'. You MUST output the <tool_call> tag to actually perform the action!"
+                    )
+                    
+                    modified_messages = list(ollama_messages)
+                    has_system = False
+                    for i, m in enumerate(modified_messages):
+                        if m.get("role") == "system":
+                            modified_messages[i] = {"role": "system", "content": m.get("content", "") + "\n\n" + tool_instructions}
+                            has_system = True
+                            break
+                    if not has_system:
+                        modified_messages.insert(0, {"role": "system", "content": tool_instructions})
+                        
+                    # print("DEBUG OLLAMA MESSAGES:", json.dumps(modified_messages, indent=2))
+
+                    response = client.chat(
                         model=self._model,
-                        messages=ollama_messages,
+                        messages=modified_messages,
                         **kwargs,
                     )
                 else:
@@ -59,7 +82,7 @@ class OllamaClient(LLMProvider):
 
             message = response.get("message", {})
 
-            # --- Tool calls ---
+            # --- Native Tool calls ---
             if message.get("tool_calls"):
                 tool_calls = []
                 for tc in message["tool_calls"]:
@@ -77,11 +100,33 @@ class OllamaClient(LLMProvider):
                     ))
                 return LLMResponse(tool_calls=tool_calls, raw=response)
 
-            # --- Plain text ---
-            return LLMResponse(text=message.get("content", ""), raw=response)
+            # --- Plain text or Manual Tool Calls ---
+            content = message.get("content", "")
+            
+            import re
+            pattern = r"<tool_call>\s*(\{.*?\})(?:\s*</tool_call>|$)"
+            matches = list(re.finditer(pattern, content, re.DOTALL))
+            
+            if matches:
+                manual_tool_calls = []
+                for match in matches:
+                    try:
+                        tc_data = json.loads(match.group(1))
+                        manual_tool_calls.append(ToolCall(
+                            id=str(uuid.uuid4())[:8],
+                            name=tc_data.get("name", ""),
+                            arguments=tc_data.get("arguments", {}),
+                        ))
+                    except json.JSONDecodeError:
+                        pass
+                
+                clean_text = re.sub(pattern, "", content, flags=re.DOTALL).strip()
+                return LLMResponse(text=clean_text or None, tool_calls=manual_tool_calls, raw=response)
+
+            return LLMResponse(text=content, raw=response)
 
         except Exception as e:
-            return LLMResponse(text=f"[Ollama error] {e}")
+            raise RuntimeError(f"[Ollama error] {e}") from e
 
     # ------------------------------------------------------------------
     # Helpers

@@ -1,12 +1,10 @@
-import mss
-import mss.tools
 from PIL import Image
 from pathlib import Path
-import time
 
 class ScreenCapture:
     def __init__(self):
-        self.sct = mss.mss()
+        import mss
+        self.sct = mss.MSS()
         
     def capture_active_monitor(self, save_path="logs/screenshot.jpg"):
         """Capture the screen and downscale it for the VLM."""

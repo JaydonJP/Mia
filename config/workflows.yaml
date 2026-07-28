@@ -6,11 +6,11 @@
 #   - launch_app: Launch an application by name
 #   - open_url:   Open a URL in the default browser
 #
-# Customize these to match your setup!
+# Customize these to match your setup.
 
 workflows:
   study_mode:
-    description: "Open study apps — Notion, Spotify (lo-fi), and Google Scholar"
+    description: "Open study apps - Notion, Spotify (lo-fi), and Google Scholar"
     actions:
       - type: launch_app
         target: notion
@@ -23,7 +23,7 @@ workflows:
         delay: 1
 
   work_mode:
-    description: "Open work apps — VS Code, Slack, and Gmail"
+    description: "Open work apps - VS Code, Slack, and Gmail"
     actions:
       - type: launch_app
         target: vscode
@@ -36,7 +36,7 @@ workflows:
         delay: 1
 
   chill_mode:
-    description: "Open entertainment — Spotify and YouTube"
+    description: "Open entertainment - Spotify and YouTube"
     actions:
       - type: launch_app
         target: spotify
@@ -46,7 +46,7 @@ workflows:
         delay: 1
 
   coding_mode:
-    description: "Open coding environment — VS Code, Terminal, and GitHub"
+    description: "Open coding environment - VS Code, Terminal, and GitHub"
     actions:
       - type: launch_app
         target: vscode

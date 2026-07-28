@@ -23,8 +23,14 @@ from .database import MiaDatabase
 from ..actions.executor import setup_executor
 from ..llm.router import LLMRouter
 from ..llm.base import LLMResponse
-from ..perception.screen import ScreenCapture
-from ..perception.accessibility import AccessibilityTree
+try:
+    from ..perception.screen import ScreenCapture
+except Exception:
+    ScreenCapture = None
+try:
+    from ..perception.accessibility import AccessibilityTree
+except Exception:
+    AccessibilityTree = None
 from ..privacy.redaction import Redactor
 
 
@@ -78,12 +84,23 @@ MAX_TOOL_STEPS = 10  # Safety cap for the ReAct loop
 class Agent:
     def __init__(self, config: dict):
         self.config = config
-        self.db = MiaDatabase()
+        db_path = config.get("database", {}).get("path") if isinstance(config, dict) else None
+        self.db = MiaDatabase(db_path=db_path)
         self.memory = SessionMemory(database=self.db)
         self.executor = setup_executor()
         self.router = LLMRouter(config)
-        self.screen = ScreenCapture()
-        self.a11y = AccessibilityTree()
+        try:
+            if ScreenCapture is None:
+                raise RuntimeError("screen capture unavailable")
+            self.screen = ScreenCapture()
+        except Exception:
+            self.screen = None
+        try:
+            if AccessibilityTree is None:
+                raise RuntimeError("accessibility tree unavailable")
+            self.a11y = AccessibilityTree()
+        except Exception:
+            self.a11y = None
         self.redactor = Redactor()
         self.event_log = EventLog()
         self.state: str = "idle"
@@ -103,6 +120,71 @@ class Agent:
     def _set_state(self, new_state: str) -> None:
         self.state = new_state
         self.event_log.emit("state_change", {"state": new_state})
+
+    def _model_accepts_images(self) -> bool:
+        model_name = self.router.get_model_name().lower()
+        return any(token in model_name for token in ("vl", "vision", "gpt-4o", "claude", "gemini"))
+
+    def _context_may_leave_device(self) -> bool:
+        return self.router.mode in ("cloud", "auto")
+
+    @staticmethod
+    def _is_provider_error_text(text: str) -> bool:
+        markers = (
+            "[ollama error]",
+            "[openai error]",
+            "[anthropic error]",
+            "[gemini error]",
+            "client not configured",
+            "failed to connect",
+        )
+        lowered = text.lower()
+        return any(marker in lowered for marker in markers)
+
+    def _build_current_user_message(self, user_text: str) -> dict:
+        """Attach screen and accessibility context when it is useful and safe."""
+        text = user_text
+        sensitive_window = False
+
+        try:
+            if not self.a11y:
+                tree = {}
+            else:
+                tree = self.a11y.get_active_window_tree()
+            title = tree.get("title", "")
+            sensitive_window = self.redactor.is_sensitive(title)
+
+            if sensitive_window and self._context_may_leave_device():
+                text += "\n\nScreen context blocked by privacy settings because the active window is sensitive."
+                self._log("Privacy", f"Blocked screen context for sensitive window: {title or 'unknown'}")
+            else:
+                redacted_tree = self.redactor.redact_tree(tree)
+                if redacted_tree.get("title") or redacted_tree.get("elements"):
+                    text += "\n\nActive window accessibility tree:\n" + json.dumps(redacted_tree, ensure_ascii=True)
+        except Exception as e:
+            self._log("Vision", f"Failed to read accessibility tree: {e}")
+
+        if not self._model_accepts_images():
+            return {"role": "user", "content": text}
+
+        if sensitive_window and self._context_may_leave_device():
+            return {"role": "user", "content": text}
+
+        try:
+            if not self.screen:
+                return {"role": "user", "content": text}
+            import base64
+            img_path = self.screen.capture_active_monitor()
+            with open(img_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            content = [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ]
+            return {"role": "user", "content": content}
+        except Exception as e:
+            self._log("Vision", f"Failed to capture screen: {e}")
+            return {"role": "user", "content": text}
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -135,8 +217,8 @@ class Agent:
             if msg["role"] in ("user", "assistant"):
                 messages.append(msg)
 
-        # Add current user message
-        messages.append({"role": "user", "content": user_text})
+        # Add current user message with available screen/accessibility context.
+        messages.append(self._build_current_user_message(user_text))
 
         # 3. ReAct loop
         tool_schemas = self.executor.get_schemas()
@@ -149,7 +231,15 @@ class Agent:
             self._set_state("thinking")
 
             # Call the LLM
-            llm_response: LLMResponse = self.router.chat(messages, tools=tool_schemas)
+            try:
+                llm_response: LLMResponse = self.router.chat(messages, tools=tool_schemas)
+            except Exception as e:
+                self._log("Error", str(e))
+                if final_response:
+                    break
+                final_response = f"I couldn't reach the active model: {e}"
+                self.event_log.emit("mia_response", {"text": final_response})
+                break
 
             # --- LLM returned tool calls → execute them ---
             if llm_response.has_tool_calls:
@@ -219,6 +309,9 @@ class Agent:
             else:
                 text = llm_response.text or ""
                 if text:
+                    if final_response and self._is_provider_error_text(text):
+                        self._log("Error", text)
+                        break
                     final_response = text
                     self._set_state("speaking")
                     if tts_engine:

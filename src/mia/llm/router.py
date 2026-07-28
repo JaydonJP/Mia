@@ -57,6 +57,13 @@ class LLMRouter:
     def get_model_name(self) -> str:
         return self.get_active_provider().model_name
 
+    @staticmethod
+    def _client_ready(client: LLMProvider | None) -> bool:
+        if client is None:
+            return False
+        configured_client = getattr(client, "client", True)
+        return configured_client is not None
+
     # ------------------------------------------------------------------
     def chat(
         self,
@@ -81,7 +88,7 @@ class LLMRouter:
             )
             is_complex = len(messages) > 8
 
-            if (has_images or is_complex) and self.cloud_client:
+            if (has_images or is_complex) and self._client_ready(self.cloud_client):
                 return self.cloud_client.chat(messages, tools)
 
         # Default: local

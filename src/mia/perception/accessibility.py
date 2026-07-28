@@ -1,12 +1,11 @@
-import uiautomation as auto
 import json
-import pythoncom
 
 
 class AccessibilityTree:
     def __init__(self):
         # Set faster timeout for uiautomation
         try:
+            import uiautomation as auto
             auto.SetGlobalSearchTimeout(1)
         except Exception:
             pass
@@ -15,6 +14,7 @@ class AccessibilityTree:
         """Initialize COM on the current thread. Required when called from
         non-main threads (e.g. FastAPI/uvicorn worker threads)."""
         try:
+            import pythoncom
             pythoncom.CoInitialize()
         except Exception:
             pass  # Already initialized on this thread
@@ -24,6 +24,7 @@ class AccessibilityTree:
         self._ensure_com()
         
         try:
+            import uiautomation as auto
             window = auto.GetForegroundControl()
         except Exception as e:
             return {"title": "Unknown", "type": "Unknown", "elements": [], "error": f"COM error: {e}"}

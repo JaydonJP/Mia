@@ -10,6 +10,7 @@ Entry point for the CLI. Run with:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import yaml
 from pathlib import Path
@@ -105,6 +106,11 @@ def run_cli(config: dict, mode_override: str | None = None):
             console.console.print(list_workflows())
             continue
 
+        direct_result = _try_direct_tool_call(agent, user_input)
+        if direct_result is not None:
+            console.log("Tool", direct_result)
+            continue
+
         # Process as a message to Mia
         console.start_spinner("Thinking...")
         try:
@@ -117,6 +123,49 @@ def run_cli(config: dict, mode_override: str | None = None):
         except Exception as e:
             console.stop_spinner()
             console.print_error(str(e))
+
+
+def _try_direct_tool_call(agent, user_input: str) -> str | None:
+    """Execute CLI input of the form `tool_name args` without an LLM round trip."""
+    stripped = user_input.strip()
+    if not stripped:
+        return None
+
+    parts = stripped.split(maxsplit=1)
+    tool_name = parts[0]
+    if tool_name not in agent.executor.tools:
+        return None
+
+    raw_args = parts[1].strip() if len(parts) > 1 else ""
+    schema = next(
+        (s["function"]["parameters"] for s in agent.executor.get_schemas() if s["function"]["name"] == tool_name),
+        {"required": [], "properties": {}},
+    )
+    required = schema.get("required", [])
+
+    if raw_args.startswith("{"):
+        try:
+            kwargs = json.loads(raw_args)
+        except json.JSONDecodeError as e:
+            return f"Invalid JSON arguments for {tool_name}: {e}"
+    elif not required:
+        kwargs = {}
+    elif len(required) == 1:
+        value = raw_args
+        prop_type = schema.get("properties", {}).get(required[0], {}).get("type")
+        if prop_type == "number":
+            try:
+                value = float(value)
+            except ValueError:
+                return f"Invalid number for {required[0]}: {raw_args}"
+        kwargs = {required[0]: value}
+    else:
+        return (
+            f"{tool_name} requires structured arguments. "
+            f"Use JSON, for example: {tool_name} {{\"{required[0]}\": \"...\"}}"
+        )
+
+    return agent.executor.execute(tool_name, kwargs)
 
 
 def run_server():

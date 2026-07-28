@@ -207,4 +207,4 @@ class GeminiClient(LLMProvider):
             )
 
         except Exception as e:
-            return LLMResponse(text=f"[Gemini error] {e}")
+            raise RuntimeError(f"[Gemini error] {e}") from e

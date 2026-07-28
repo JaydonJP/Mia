@@ -1,19 +1,24 @@
 import sys
-import numpy as np
-import sounddevice as sd
-from faster_whisper import WhisperModel
 import queue
-import threading
 
 class SpeechToText:
     def __init__(self, model_size="small"):
         self.model_size = model_size
+        self.model = None
+        self.available = False
         print(f"Loading faster-whisper {model_size} model...")
         try:
+            from faster_whisper import WhisperModel
             self.model = WhisperModel(model_size, device="cuda", compute_type="float16")
+            self.available = True
         except Exception as e:
             print(f"CUDA not available for whisper, falling back to CPU... ({e})")
-            self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            try:
+                from faster_whisper import WhisperModel
+                self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
+                self.available = True
+            except Exception as cpu_error:
+                print(f"Speech-to-text unavailable. Text-only mode fallback. ({cpu_error})")
             
         self.q = queue.Queue()
         self.recording = False
@@ -21,9 +26,13 @@ class SpeechToText:
         self.stream = None
 
     def start_recording(self):
+        if not self.available:
+            print("Speech-to-text unavailable. Use the CLI text prompt instead.")
+            return
         self.recording = True
         self.q.queue.clear()
         try:
+            import sounddevice as sd
             self.stream = sd.InputStream(samplerate=self.samplerate, channels=1, 
                                          dtype='float32', callback=self.audio_callback)
             self.stream.start()
@@ -37,6 +46,8 @@ class SpeechToText:
             self.q.put(indata.copy())
 
     def stop_recording_and_transcribe(self):
+        if not self.available:
+            return ""
         self.recording = False
         if self.stream:
             self.stream.stop()
@@ -50,6 +61,7 @@ class SpeechToText:
         if not audio_data:
             return ""
             
+        import numpy as np
         audio_np = np.concatenate(audio_data, axis=0).flatten()
         
         # Transcribe
@@ -57,6 +69,7 @@ class SpeechToText:
             segments, info = self.model.transcribe(audio_np, beam_size=5)
         except Exception as e:
             print(f"GPU Transcription failed (missing CUDA DLLs?). Falling back to CPU. Error: {e}")
+            from faster_whisper import WhisperModel
             self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
             segments, info = self.model.transcribe(audio_np, beam_size=5)
             

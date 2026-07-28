@@ -77,4 +77,4 @@ class OpenAIClient(LLMProvider):
             return LLMResponse(text=message.content or "", raw=response)
 
         except Exception as e:
-            return LLMResponse(text=f"[OpenAI error] {e}")
+            raise RuntimeError(f"[OpenAI error] {e}") from e

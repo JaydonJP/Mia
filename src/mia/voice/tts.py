@@ -1,15 +1,17 @@
-import os
-import sounddevice as sd
-import numpy as np
 from pathlib import Path
 try:
-    from piper import PiperVoice
+    from piper.voice import PiperVoice
 except ImportError:
-    PiperVoice = None
+    try:
+        from piper import PiperVoice
+    except ImportError:
+        PiperVoice = None
 
 class TextToSpeech:
     def __init__(self, voice_model_path="models/en_GB-alan-medium.onnx"):
         self.model_path = Path(voice_model_path)
+        if not self.model_path.is_absolute():
+            self.model_path = Path(__file__).resolve().parents[3] / self.model_path
         self.voice = None
         if PiperVoice:
             if not self.model_path.exists():
@@ -26,6 +28,8 @@ class TextToSpeech:
             
         print(f"Mia: {text}")
         try:
+            import numpy as np
+            import sounddevice as sd
             audio_stream = self.voice.synthesize_stream_raw(text)
             
             for chunk in audio_stream:

@@ -1,16 +1,13 @@
 """
-Workflow engine — named automation sequences loaded from config/workflows.yaml.
-
-Each workflow is a list of actions (launch apps, open URLs, etc.) that can be
-triggered by name (e.g., "activate study mode").
+Workflow engine - named automation sequences loaded from config/workflows.yaml.
 """
 
 from __future__ import annotations
 
-import os
 import time
 import yaml
 from pathlib import Path
+
 from .apps import launch_app, open_url
 
 
@@ -22,9 +19,9 @@ def _load_workflows() -> dict:
     if _WORKFLOWS is not None:
         return _WORKFLOWS
 
-    config_path = Path(__file__).parent.parent.parent.parent / "config" / "workflows.yaml"
+    config_path = Path(__file__).resolve().parents[3] / "config" / "workflows.yaml"
     if config_path.exists():
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         _WORKFLOWS = data.get("workflows", {})
     else:
@@ -42,16 +39,15 @@ def list_workflows() -> str:
     lines = ["Available workflows:"]
     for name, wf in workflows.items():
         desc = wf.get("description", "No description")
-        lines.append(f"  • {name}: {desc}")
+        lines.append(f"  - {name}: {desc}")
     return "\n".join(lines)
 
 
 def activate_workflow(name: str) -> str:
-    """Activate a named workflow — executes all its actions in sequence."""
+    """Activate a named workflow and execute all actions in sequence."""
     workflows = _load_workflows()
     wf_key = name.strip().lower().replace(" ", "_")
 
-    # Try exact match first, then fuzzy
     workflow = workflows.get(wf_key)
     if not workflow:
         for key, val in workflows.items():
@@ -72,16 +68,19 @@ def activate_workflow(name: str) -> str:
     for action in actions:
         action_type = action.get("type", "")
         target = action.get("target", "")
-        delay = action.get("delay", 1.5)  # Default delay between actions
+        try:
+            delay = min(max(float(action.get("delay", 1.5)), 0), 30)
+        except (TypeError, ValueError):
+            delay = 1.5
 
         if action_type == "launch_app":
             result = launch_app(target)
-            results.append(f"  → {result}")
+            results.append(f"  -> {result}")
         elif action_type == "open_url":
             result = open_url(target)
-            results.append(f"  → {result}")
+            results.append(f"  -> {result}")
         else:
-            results.append(f"  → Unknown action type: {action_type}")
+            results.append(f"  -> Unknown action type: {action_type}")
 
         time.sleep(delay)
 

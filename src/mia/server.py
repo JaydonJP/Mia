@@ -220,9 +220,14 @@ def clear_history():
 @app.get("/api/screen")
 def get_screen():
     backend = MiaBackend.get()
-    if not backend.agent:
+    if not backend.agent or not backend.agent.screen:
         return {"image": None}
     try:
+        if backend.agent.a11y:
+            tree = backend.agent.a11y.get_active_window_tree()
+            title = tree.get("title", "")
+            if backend.agent.redactor.is_sensitive(title):
+                return {"image": None, "blocked": True, "reason": "sensitive_window"}
         img_path = backend.agent.screen.capture_active_monitor()
         if img_path and os.path.exists(img_path):
             with open(img_path, "rb") as f:

@@ -160,7 +160,7 @@ class AnthropicClient(LLMProvider):
             )
 
         except Exception as e:
-            return LLMResponse(text=f"[Anthropic error] {e}")
+            raise RuntimeError(f"[Anthropic error] {e}") from e
 
     @staticmethod
     def _merge_consecutive(messages: list[dict]) -> list[dict]:
